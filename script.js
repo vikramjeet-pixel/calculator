@@ -1,3 +1,4 @@
+// Calculator state
 let calculation = '';
 let memory = 0;
 let history = [];
@@ -35,8 +36,14 @@ function memoryAdd() {
 
 function factorial(n) {
     if (!Number.isInteger(n) || n < 0) return NaN;
+    if (n > 170) return Infinity;
     if (n === 0) return 1;
-    return n * factorial(n - 1);
+
+    let result = 1;
+    for (let i = 2; i <= n; i++) {
+        result *= i;
+    }
+    return result;
 }
 
 function calculateExpression(expr) {
@@ -44,8 +51,8 @@ function calculateExpression(expr) {
         let expression = expr
             .replace('×', '*')
             .replace('^', '**')
-            .replace('π', Math.PI)
-            .replace('e', Math.E)
+            .replace('π', Math.PI.toString())
+            .replace('e', Math.E.toString())
             .replace('sin(', 'Math.sin(')
             .replace('cos(', 'Math.cos(')
             .replace('tan(', 'Math.tan(')
@@ -61,9 +68,11 @@ function calculateExpression(expr) {
 
         if (!expression || !/[0-9]/.test(expression)) throw new Error('Invalid input');
         if (expression.includes('/0')) throw new Error('Division by zero');
-        if (expression.match(/\(/g)?.length !== expression.match(/\)/g)?.length) throw new Error('Unmatched parentheses');
+        if (expression.match(/\(/g)?.length !== expression.match(/\)/g)?.length) {
+            throw new Error('Unmatched parentheses');
+        }
 
-        const result = Function(`return ${expression}`)();
+        const result = Function(`"use strict"; return ${expression}`)();
         if (isNaN(result) || !isFinite(result)) throw new Error('Calculation error');
         return Number(result.toFixed(10));
     } catch (error) {
@@ -77,11 +86,20 @@ function calculate() {
         history.unshift(`${calculation} = ${result}`);
         updateHistory();
         calculation = result.toString();
+        undoStack.push(calculation);
+        redoStack = [];
         updateDisplay();
     } catch (error) {
-        document.getElementById('display').innerHTML = `<span style="color: #ff6666">${error.message}</span>`;
-        calculation = '';
-        setTimeout(() => updateDisplay(), 1500);
+        const display = document.getElementById('display');
+        if (display) {
+            display.innerHTML = `<span style="color: #ff6666">${error.message}</span>`;
+            calculation = '';
+            setTimeout(() => {
+                if (document.getElementById('display') === display) {
+                    updateDisplay();
+                }
+            }, 1500);
+        }
     }
 }
 
@@ -90,25 +108,81 @@ function convertUnits(type) {
     if (isNaN(value)) return;
     if (type === 'mToFt') calculation = (value * 3.28084).toString();
     if (type === 'kgToLb') calculation = (value * 2.20462).toString();
+    undoStack.push(calculation);
+    redoStack = [];
     updateDisplay();
 }
 
 function updateDisplay() {
     const display = document.getElementById('display');
     const preview = document.getElementById('preview');
-    display.textContent = calculation || '0';
 
-    // Syntax highlighting
-    display.innerHTML = calculation
-        .replace(/(\d+\.?\d*)/g, '<span style="color: #ffffff">$1</span>')
-        .replace(/[+\-*/^%()]/g, '<span style="color: #00ffff">$&</span>')
-        .replace(/(sin|cos|tan|asin|acos|atan|log|ln|sqrt|π|e|mod|!)/g, '<span style="color: #66ccff">$1</span>');
+    if (!display || !preview) {
+        console.error("Display or preview element not found");
+        return;
+    }
 
-    // Live preview
+    // Clear current content
+    display.innerHTML = '';
+
+    // Get the current calculation or default to '0'
+    const text = calculation || '0';
+
+    // Create a document fragment to build the highlighted content
+    const fragment = document.createDocumentFragment();
+
+    // Split the text into characters and process each one
+    const numberPattern = /(\d+\.?\d*)/g;
+    const operatorPattern = /[+\-×/^%()]/g;
+    const functionPattern = /(sin|cos|tan|asin|acos|atan|log|ln|sqrt|π|e|mod|!)/g;
+    let lastIndex = 0;
+    const combinedPattern = new RegExp(
+        `${numberPattern.source}|${operatorPattern.source}|${functionPattern.source}`,
+        'g'
+    );
+
+    text.replace(combinedPattern, (match, number, offset) => {
+        // Add any plain text before the match
+        if (offset > lastIndex) {
+            const plainText = document.createTextNode(text.slice(lastIndex, offset));
+            fragment.appendChild(plainText);
+        }
+
+        // Create a span for the matched content
+        const span = document.createElement('span');
+        if (numberPattern.test(match)) {
+            span.style.color = '#ffffff'; // Numbers in white
+        } else if (operatorPattern.test(match)) {
+            span.style.color = '#00ffff'; // Operators in cyan
+        } else if (functionPattern.test(match)) {
+            span.style.color = '#66ccff'; // Functions in light blue
+        }
+        span.textContent = match;
+        fragment.appendChild(span);
+        lastIndex = offset + match.length;
+        return match;
+    });
+
+    // Add any remaining plain text
+    if (lastIndex < text.length) {
+        const plainText = document.createTextNode(text.slice(lastIndex));
+        fragment.appendChild(plainText);
+    }
+
+    // Append the fragment to the display
+    display.appendChild(fragment);
+
+    // Update preview
     try {
-        const result = calculateExpression(calculation);
-        preview.textContent = `= ${result.toLocaleString(undefined, { maximumFractionDigits: 10 })}`;
-        if (Math.abs(result) > 1e6) preview.textContent = `= ${result.toExponential(3)}`;
+        if (calculation) {
+            const result = calculateExpression(calculation);
+            preview.textContent = `= ${result.toLocaleString(undefined, {
+                maximumFractionDigits: 10
+            })}`;
+            if (Math.abs(result) > 1e6) preview.textContent = `= ${result.toExponential(3)}`;
+        } else {
+            preview.textContent = '';
+        }
     } catch {
         preview.textContent = '';
     }
@@ -116,11 +190,17 @@ function updateDisplay() {
 
 function updateHistory() {
     const historyDiv = document.getElementById('history');
-    historyDiv.innerHTML = history.map((item, i) => `<div class="history-item" onclick="reuseHistory(${i})">${item}</div>`).join('');
+    if (historyDiv) {
+        historyDiv.innerHTML = history
+            .map((item, i) => `<div class="history-item" onclick="reuseHistory(${i})">${item}</div>`)
+            .join('');
+    }
 }
 
 function reuseHistory(index) {
     calculation = history[index].split(' = ')[0];
+    undoStack.push(calculation);
+    redoStack = [];
     updateDisplay();
 }
 
@@ -144,13 +224,20 @@ function redo() {
     }
 }
 
-// Enhanced keyboard support
+// Keyboard support
 document.addEventListener('keydown', (event) => {
-    event.preventDefault();
     const key = event.key;
-    const validNumbers = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    const calculatorKeys = [
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        '+', '-', '*', '/', '(', ')', '.', 'Enter', 'Escape', 'Backspace',
+        '^', '%', '!', 'p', 'e', 's', 'c', 't', 'l', 'n', 'r'
+    ];
 
-    if (validNumbers.includes(key)) addToCalculation(key);
+    if (calculatorKeys.includes(key) || event.ctrlKey || event.shiftKey) {
+        event.preventDefault();
+    }
+
+    if (['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(key)) addToCalculation(key);
     else if (key === '.') addToCalculation('.');
     else if (key === '+') addToCalculation('+');
     else if (key === '-') addToCalculation('-');
@@ -179,3 +266,6 @@ document.addEventListener('keydown', (event) => {
     else if (key === 'm' && event.shiftKey) memoryStore();
     else if (key === 'r' && event.shiftKey) memoryRecall();
 });
+
+// Initialize display
+updateDisplay();
