@@ -264,6 +264,7 @@ document.addEventListener('keydown', (event) => {
     } else if (key === 'z' && event.ctrlKey) undo();
     else if (key === 'y' && event.ctrlKey) redo();
     else if (key === 'm' && event.shiftKey) memoryStore();
+// sourcery skip: use-braces
     else if (key === 'r' && event.shiftKey) memoryRecall();
 });
 
